@@ -48,7 +48,7 @@ enum ColorMode    { CHANNEL, INTENSITY, RAINBOW, MORELAND, NEBULAE, FIRE, FIERY,
 enum SlideMode    { REPLACE, SCROLL, FULLFRAME, RSCROLL, NB_SLIDES };
 enum Orientation  { VERTICAL, HORIZONTAL, NB_ORIENTATIONS };
 
-typedef struct {
+typedef struct ShowSpectrumContext {
     const AVClass *class;
     int w, h;
     AVFrame *outpicref;
@@ -426,7 +426,7 @@ static int config_output(AVFilterLink *outlink)
             memset(outpicref->data[1] + i * outpicref->linesize[1], 128, outlink->w);
             memset(outpicref->data[2] + i * outpicref->linesize[2], 128, outlink->w);
         }
-        av_frame_set_color_range(outpicref, AVCOL_RANGE_JPEG);
+        outpicref->color_range = AVCOL_RANGE_JPEG;
     }
 
     if ((s->orientation == VERTICAL   && s->xpos >= s->w) ||
@@ -1022,17 +1022,19 @@ static int showspectrumpic_request_frame(AVFilterLink *outlink)
     AVFilterContext *ctx = outlink->src;
     ShowSpectrumContext *s = ctx->priv;
     AVFilterLink *inlink = ctx->inputs[0];
-    int ret;
+    int ret, samples;
 
     ret = ff_request_frame(inlink);
-    if (ret == AVERROR_EOF && s->outpicref) {
-        int samples = av_audio_fifo_size(s->fifo);
+    samples = av_audio_fifo_size(s->fifo);
+    if (ret == AVERROR_EOF && s->outpicref && samples > 0) {
         int consumed = 0;
         int y, x = 0, sz = s->orientation == VERTICAL ? s->w : s->h;
         int ch, spf, spb;
         AVFrame *fin;
 
         spf = s->win_size * (samples / ((s->win_size * sz) * ceil(samples / (float)(s->win_size * sz))));
+        spf = FFMAX(1, spf);
+
         spb = (samples / (spf * sz)) * spf;
 
         fin = ff_get_audio_buffer(inlink, s->win_size);
@@ -1255,6 +1257,7 @@ static int showspectrumpic_request_frame(AVFilterLink *outlink)
                     if (!text)
                         continue;
                     drawtext(s->outpicref, s->w + s->start_x + 35, s->start_y + y - 5, text, 0);
+                    av_free(text);
                 }
             }
         }

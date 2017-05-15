@@ -755,6 +755,8 @@ static int jpeg_probe(AVProbeData *p)
 
     if (state == EOI)
         return AVPROBE_SCORE_EXTENSION + 1;
+    if (state == SOS)
+        return AVPROBE_SCORE_EXTENSION / 2;
     return AVPROBE_SCORE_EXTENSION / 8;
 }
 
@@ -847,10 +849,7 @@ static int psd_probe(AVProbeData *p)
     if ((color_mode <= 9) && (color_mode != 5) && (color_mode != 6))
         ret += 1;
 
-    if (ret)
-        return AVPROBE_SCORE_EXTENSION + ret;
-
-    return 0;
+    return AVPROBE_SCORE_EXTENSION + ret;
 }
 
 static int sgi_probe(AVProbeData *p)
@@ -944,6 +943,15 @@ static int pam_probe(AVProbeData *p)
     return pnm_magic_check(p, 7) ? pnm_probe(p) : 0;
 }
 
+static int xpm_probe(AVProbeData *p)
+{
+    const uint8_t *b = p->buf;
+
+    if (AV_RB64(b) == 0x2f2a2058504d202a && *(b+8) == '/')
+        return AVPROBE_SCORE_MAX - 1;
+    return 0;
+}
+
 #define IMAGEAUTO_DEMUXER(imgname, codecid)\
 static const AVClass imgname ## _class = {\
     .class_name = AV_STRINGIFY(imgname) " demuxer",\
@@ -984,3 +992,4 @@ IMAGEAUTO_DEMUXER(sgi,     AV_CODEC_ID_SGI)
 IMAGEAUTO_DEMUXER(sunrast, AV_CODEC_ID_SUNRAST)
 IMAGEAUTO_DEMUXER(tiff,    AV_CODEC_ID_TIFF)
 IMAGEAUTO_DEMUXER(webp,    AV_CODEC_ID_WEBP)
+IMAGEAUTO_DEMUXER(xpm,     AV_CODEC_ID_XPM)

@@ -268,6 +268,8 @@ typedef struct AVFilter {
 
     int priv_size;      ///< size of private data to allocate for the filter
 
+    int flags_internal; ///< Additional flags for avfilter internal use only.
+
     /**
      * Used by the filter registration system. Must not be touched by any other
      * code.
@@ -294,6 +296,20 @@ typedef struct AVFilter {
      * used for providing binary data.
      */
     int (*init_opaque)(AVFilterContext *ctx, void *opaque);
+
+    /**
+     * Filter activation function.
+     *
+     * Called when any processing is needed from the filter, instead of any
+     * filter_frame and request_frame on pads.
+     *
+     * The function must examine inlinks and outlinks and perform a single
+     * step of processing. If there is nothing to do, the function must do
+     * nothing and not return an error. If more steps are or may be
+     * possible, it must use ff_filter_set_ready() to schedule another
+     * activation.
+     */
+    int (*activate)(AVFilterContext *ctx);
 } AVFilter;
 
 /**
@@ -383,6 +399,11 @@ struct AVFilterContext {
  * the pads involved. In addition, this link also contains the parameters
  * which have been negotiated and agreed upon between the filter, such as
  * image dimensions, format, etc.
+ *
+ * Applications must not normally access the link structure directly.
+ * Use the buffersrc and buffersink API instead.
+ * In the future, access to the header may be reserved for filters
+ * implementation.
  */
 struct AVFilterLink {
     AVFilterContext *src;       ///< source filter
@@ -531,9 +552,9 @@ struct AVFilterLink {
     int64_t frame_count_in, frame_count_out;
 
     /**
-     * A pointer to a FFVideoFramePool struct.
+     * A pointer to a FFFramePool struct.
      */
-    void *video_frame_pool;
+    void *frame_pool;
 
     /**
      * True if a frame is currently wanted on the output of this filter.
@@ -822,7 +843,9 @@ typedef struct AVFilterGraph {
     unsigned nb_filters;
 
     char *scale_sws_opts; ///< sws options to use for the auto-inserted scale filters
-    char *resample_lavr_opts;   ///< libavresample options to use for the auto-inserted resample filters
+#if FF_API_LAVR_OPTS
+    attribute_deprecated char *resample_lavr_opts;   ///< libavresample options to use for the auto-inserted resample filters
+#endif
 
     /**
      * Type of multithreading allowed for filters in this graph. A combination
