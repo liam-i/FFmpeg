@@ -31,14 +31,13 @@
 #include "sbr.h"
 #include "aacsbr.h"
 #include "aacsbrdata.h"
-#include "aacsbr_tablegen.h"
-#include "fft.h"
 #include "internal.h"
 #include "aacps.h"
 #include "sbrdsp.h"
 #include "libavutil/internal.h"
 #include "libavutil/libm.h"
 #include "libavutil/avassert.h"
+#include "libavutil/mem_internal.h"
 
 #include <stdint.h>
 #include <float.h>
@@ -241,6 +240,7 @@ static void sbr_gain_calc(AACContext *ac, SpectralBandReplication *sbr,
                                             ((1.0f + sbr->e_curr[e][m]) *
                                              (1.0f + sbr->q_mapped[e][m])));
                 }
+                sbr->gain[e][m] += FLT_MIN;
             }
             for (m = sbr->f_tablelim[k] - sbr->kx[1]; m < sbr->f_tablelim[k + 1] - sbr->kx[1]; m++) {
                 sum[0] += sbr->e_origmapped[e][m];

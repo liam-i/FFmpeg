@@ -23,8 +23,8 @@
 #define AVCODEC_MPEG4AUDIO_H
 
 #include <stdint.h>
+
 #include "get_bits.h"
-#include "put_bits.h"
 
 typedef struct MPEG4AudioConfig {
     int object_type;
@@ -41,29 +41,31 @@ typedef struct MPEG4AudioConfig {
     int frame_length_short;
 } MPEG4AudioConfig;
 
-extern av_export const int avpriv_mpeg4audio_sample_rates[16];
-extern const uint8_t ff_mpeg4audio_channels[8];
+extern const int     ff_mpeg4audio_sample_rates[16];
+extern const uint8_t ff_mpeg4audio_channels[15];
 
 /**
  * Parse MPEG-4 systems extradata from a potentially unaligned GetBitContext to retrieve audio configuration.
  * @param[in] c        MPEG4AudioConfig structure to fill.
  * @param[in] gb       Extradata from container.
  * @param[in] sync_extension look for a sync extension after config if true.
- * @return On error -1 is returned, on success AudioSpecificConfig bit index in extradata.
+ * @param[in] logctx opaque struct starting with an AVClass element, used for logging.
+ * @return negative AVERROR code on error, on success AudioSpecificConfig bit index in extradata.
  */
 int ff_mpeg4audio_get_config_gb(MPEG4AudioConfig *c, GetBitContext *gb,
-                                int sync_extension);
+                                int sync_extension, void *logctx);
 
 /**
  * Parse MPEG-4 systems extradata from a raw buffer to retrieve audio configuration.
  * @param[in] c        MPEG4AudioConfig structure to fill.
  * @param[in] buf      Extradata from container.
- * @param[in] bit_size Extradata size in bits.
+ * @param[in] size     Extradata size in bytes.
  * @param[in] sync_extension look for a sync extension after config if true.
- * @return On error -1 is returned, on success AudioSpecificConfig bit index in extradata.
+ * @param[in] logctx opaque struct starting with an AVClass element, used for logging.
+ * @return negative AVERROR code on error, AudioSpecificConfig bit index in extradata on success.
  */
-int avpriv_mpeg4audio_get_config(MPEG4AudioConfig *c, const uint8_t *buf,
-                                 int bit_size, int sync_extension);
+int avpriv_mpeg4audio_get_config2(MPEG4AudioConfig *c, const uint8_t *buf,
+                                  int size, int sync_extension, void *logctx);
 
 enum AudioObjectType {
     AOT_NULL,
@@ -114,7 +116,5 @@ enum AudioObjectType {
 
 #define MAX_PCE_SIZE 320 ///<Maximum size of a PCE including the 3-bit ID_PCE
                          ///<marker and the comment
-
-int avpriv_copy_pce_data(PutBitContext *pb, GetBitContext *gb);
 
 #endif /* AVCODEC_MPEG4AUDIO_H */

@@ -21,13 +21,12 @@
 #ifndef AVCODEC_DCA_CORE_H
 #define AVCODEC_DCA_CORE_H
 
-#include "libavutil/common.h"
 #include "libavutil/float_dsp.h"
 #include "libavutil/fixed_dsp.h"
-#include "libavutil/mem.h"
+#include "libavutil/mem_internal.h"
+#include "libavutil/tx.h"
 
 #include "avcodec.h"
-#include "internal.h"
 #include "get_bits.h"
 #include "dca.h"
 #include "dca_exss.h"
@@ -35,7 +34,6 @@
 #include "dcadct.h"
 #include "dcamath.h"
 #include "dcahuff.h"
-#include "fft.h"
 #include "synth_filter.h"
 
 #define DCA_CHANNELS            7
@@ -56,6 +54,34 @@
 #define DCA_FILTER_MODE_X96     0x01
 #define DCA_FILTER_MODE_FIXED   0x02
 
+enum DCACoreAudioMode {
+    DCA_AMODE_MONO,             // Mode 0: A (mono)
+    DCA_AMODE_MONO_DUAL,        // Mode 1: A + B (dual mono)
+    DCA_AMODE_STEREO,           // Mode 2: L + R (stereo)
+    DCA_AMODE_STEREO_SUMDIFF,   // Mode 3: (L+R) + (L-R) (sum-diff)
+    DCA_AMODE_STEREO_TOTAL,     // Mode 4: LT + RT (left and right total)
+    DCA_AMODE_3F,               // Mode 5: C + L + R
+    DCA_AMODE_2F1R,             // Mode 6: L + R + S
+    DCA_AMODE_3F1R,             // Mode 7: C + L + R + S
+    DCA_AMODE_2F2R,             // Mode 8: L + R + SL + SR
+    DCA_AMODE_3F2R,             // Mode 9: C + L + R + SL + SR
+
+    DCA_AMODE_COUNT
+};
+
+enum DCACoreExtAudioType {
+    DCA_EXT_AUDIO_XCH   = 0,
+    DCA_EXT_AUDIO_X96   = 2,
+    DCA_EXT_AUDIO_XXCH  = 6
+};
+
+enum DCACoreLFEFlag {
+    DCA_LFE_FLAG_NONE,
+    DCA_LFE_FLAG_128,
+    DCA_LFE_FLAG_64,
+    DCA_LFE_FLAG_INVALID
+};
+
 typedef struct DCADSPData {
     union {
         struct {
@@ -73,6 +99,7 @@ typedef struct DCADSPData {
 typedef struct DCACoreDecoder {
     AVCodecContext  *avctx;
     GetBitContext   gb;
+    GetBitContext   gb_in;
 
     // Bit stream header
     int     crc_present;        ///< CRC present flag
@@ -163,7 +190,8 @@ typedef struct DCACoreDecoder {
     DCADSPData              dcadsp_data[DCA_CHANNELS];    ///< FIR history buffers
     DCADSPContext           *dcadsp;
     DCADCTContext           dcadct;
-    FFTContext              imdct[2];
+    AVTXContext            *imdct[2];
+    av_tx_fn                imdct_fn[2];
     SynthFilterContext      synth;
     AVFloatDSPContext       *float_dsp;
     AVFixedDSPContext       *fixed_dsp;
@@ -218,8 +246,8 @@ static inline void ff_dca_core_dequantize(int32_t *output, const int32_t *input,
     }
 }
 
-int ff_dca_core_parse(DCACoreDecoder *s, uint8_t *data, int size);
-int ff_dca_core_parse_exss(DCACoreDecoder *s, uint8_t *data, DCAExssAsset *asset);
+int ff_dca_core_parse(DCACoreDecoder *s, const uint8_t *data, int size);
+int ff_dca_core_parse_exss(DCACoreDecoder *s, const uint8_t *data, DCAExssAsset *asset);
 int ff_dca_core_filter_fixed(DCACoreDecoder *s, int x96_synth);
 int ff_dca_core_filter_frame(DCACoreDecoder *s, AVFrame *frame);
 av_cold void ff_dca_core_flush(DCACoreDecoder *s);

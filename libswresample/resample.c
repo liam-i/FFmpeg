@@ -27,6 +27,7 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/cpu.h"
 #include "resample.h"
 
 static inline double eval_poly(const double *coeff, int size, double x) {
@@ -451,9 +452,6 @@ static int set_compensation(ResampleContext *c, int sample_delta, int compensati
 
 static int multiple_resample(ResampleContext *c, AudioData *dst, int dst_size, AudioData *src, int src_size, int *consumed){
     int i;
-    int av_unused mm_flags = av_get_cpu_flags();
-    int need_emms = c->format == AV_SAMPLE_FMT_S16P && ARCH_X86_32 &&
-                    (mm_flags & (AV_CPU_FLAG_MMX2 | AV_CPU_FLAG_SSE2)) == AV_CPU_FLAG_MMX2;
     int64_t max_src_size = (INT64_MAX/2 / c->phase_count) / c->src_incr;
 
     if (c->compensation_distance)
@@ -499,9 +497,6 @@ static int multiple_resample(ResampleContext *c, AudioData *dst, int dst_size, A
         }
     }
 
-    if(need_emms)
-        emms_c();
-
     if (c->compensation_distance) {
         c->compensation_distance -= dst_size;
         if (!c->compensation_distance) {
@@ -544,18 +539,21 @@ static int64_t get_out_samples(struct SwrContext *s, int in_samples) {
 }
 
 static int resample_flush(struct SwrContext *s) {
+    ResampleContext *c = s->resample;
     AudioData *a= &s->in_buffer;
     int i, j, ret;
-    if((ret = swri_realloc_audio(a, s->in_buffer_index + 2*s->in_buffer_count)) < 0)
+    int reflection = (FFMIN(s->in_buffer_count, c->filter_length) + 1) / 2;
+
+    if((ret = swri_realloc_audio(a, s->in_buffer_index + s->in_buffer_count + reflection)) < 0)
         return ret;
     av_assert0(a->planar);
     for(i=0; i<a->ch_count; i++){
-        for(j=0; j<s->in_buffer_count; j++){
+        for(j=0; j<reflection; j++){
             memcpy(a->ch[i] + (s->in_buffer_index+s->in_buffer_count+j  )*a->bps,
                 a->ch[i] + (s->in_buffer_index+s->in_buffer_count-j-1)*a->bps, a->bps);
         }
     }
-    s->in_buffer_count += (s->in_buffer_count+1)/2;
+    s->in_buffer_count += reflection;
     return 0;
 }
 

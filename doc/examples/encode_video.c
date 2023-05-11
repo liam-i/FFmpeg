@@ -21,10 +21,10 @@
  */
 
 /**
- * @file
- * video encoding with libavcodec API example
- *
+ * @file libavcodec encoding video API usage example
  * @example encode_video.c
+ *
+ * Generate synthetic video data and encode it to an output file.
  */
 
 #include <stdio.h>
@@ -42,6 +42,9 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
     int ret;
 
     /* send the frame to the encoder */
+    if (frame)
+        printf("Send frame %3"PRId64"\n", frame->pts);
+
     ret = avcodec_send_frame(enc_ctx, frame);
     if (ret < 0) {
         fprintf(stderr, "Error sending a frame for encoding\n");
@@ -57,7 +60,7 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt,
             exit(1);
         }
 
-        printf("Write frame %3"PRId64" (size=%5d)\n", pkt->pts, pkt->size);
+        printf("Write packet %3"PRId64" (size=%5d)\n", pkt->pts, pkt->size);
         fwrite(pkt->data, 1, pkt->size, outfile);
         av_packet_unref(pkt);
     }
@@ -81,12 +84,10 @@ int main(int argc, char **argv)
     filename = argv[1];
     codec_name = argv[2];
 
-    avcodec_register_all();
-
     /* find the mpeg1video encoder */
     codec = avcodec_find_encoder_by_name(codec_name);
     if (!codec) {
-        fprintf(stderr, "Codec not found\n");
+        fprintf(stderr, "Codec '%s' not found\n", codec_name);
         exit(1);
     }
 
@@ -123,8 +124,9 @@ int main(int argc, char **argv)
         av_opt_set(c->priv_data, "preset", "slow", 0);
 
     /* open it */
-    if (avcodec_open2(c, codec, NULL) < 0) {
-        fprintf(stderr, "Could not open codec\n");
+    ret = avcodec_open2(c, codec, NULL);
+    if (ret < 0) {
+        fprintf(stderr, "Could not open codec: %s\n", av_err2str(ret));
         exit(1);
     }
 
@@ -143,7 +145,7 @@ int main(int argc, char **argv)
     frame->width  = c->width;
     frame->height = c->height;
 
-    ret = av_frame_get_buffer(frame, 32);
+    ret = av_frame_get_buffer(frame, 0);
     if (ret < 0) {
         fprintf(stderr, "Could not allocate the video frame data\n");
         exit(1);
@@ -153,12 +155,25 @@ int main(int argc, char **argv)
     for (i = 0; i < 25; i++) {
         fflush(stdout);
 
-        /* make sure the frame data is writable */
+        /* Make sure the frame data is writable.
+           On the first round, the frame is fresh from av_frame_get_buffer()
+           and therefore we know it is writable.
+           But on the next rounds, encode() will have called
+           avcodec_send_frame(), and the codec may have kept a reference to
+           the frame in its internal structures, that makes the frame
+           unwritable.
+           av_frame_make_writable() checks that and allocates a new buffer
+           for the frame only if necessary.
+         */
         ret = av_frame_make_writable(frame);
         if (ret < 0)
             exit(1);
 
-        /* prepare a dummy image */
+        /* Prepare a dummy image.
+           In real code, this is where you would have your own logic for
+           filling the frame. FFmpeg does not care what you put in the
+           frame.
+         */
         /* Y */
         for (y = 0; y < c->height; y++) {
             for (x = 0; x < c->width; x++) {
@@ -183,8 +198,14 @@ int main(int argc, char **argv)
     /* flush the encoder */
     encode(c, NULL, pkt, f);
 
-    /* add sequence end code to have a real MPEG file */
-    fwrite(endcode, 1, sizeof(endcode), f);
+    /* Add sequence end code to have a real MPEG file.
+       It makes only sense because this tiny examples writes packets
+       directly. This is called "elementary stream" and only works for some
+       codecs. To create a valid file, you usually need to write packets
+       into a proper file format or protocol; see mux.c.
+     */
+    if (codec->id == AV_CODEC_ID_MPEG1VIDEO || codec->id == AV_CODEC_ID_MPEG2VIDEO)
+        fwrite(endcode, 1, sizeof(endcode), f);
     fclose(f);
 
     avcodec_free_context(&c);

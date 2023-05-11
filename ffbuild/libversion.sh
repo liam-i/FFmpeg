@@ -5,10 +5,12 @@ toupper(){
 name=lib$1
 ucname=$(toupper ${name})
 file=$2
-raise_major=$3
+file2=$3
 
 eval $(awk "/#define ${ucname}_VERSION_M/ { print \$2 \"=\" \$3 }" "$file")
-eval ${ucname}_VERSION_MAJOR=$((${ucname}_VERSION_MAJOR+${raise_major}))
+if [ -f "$file2" ]; then
+  eval $(awk "/#define ${ucname}_VERSION_M/ { print \$2 \"=\" \$3 }" "$file2")
+fi
 eval ${ucname}_VERSION=\$${ucname}_VERSION_MAJOR.\$${ucname}_VERSION_MINOR.\$${ucname}_VERSION_MICRO
 eval echo "${name}_VERSION=\$${ucname}_VERSION"
 eval echo "${name}_VERSION_MAJOR=\$${ucname}_VERSION_MAJOR"

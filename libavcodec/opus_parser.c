@@ -28,21 +28,23 @@
 #include "avcodec.h"
 #include "bytestream.h"
 #include "opus.h"
+#include "opus_parse.h"
 #include "parser.h"
 
-typedef struct OpusParseContext {
+typedef struct OpusParserContext {
     ParseContext pc;
-    OpusContext ctx;
+    OpusParseContext ctx;
     OpusPacket pkt;
     int extradata_parsed;
     int ts_framing;
-} OpusParseContext;
+} OpusParserContext;
 
 static const uint8_t *parse_opus_ts_header(const uint8_t *start, int *payload_len, int buf_len)
 {
     const uint8_t *buf = start + 1;
     int start_trim_flag, end_trim_flag, control_extension_flag, control_extension_length;
     uint8_t flags;
+    uint64_t payload_len_tmp;
 
     GetByteContext gb;
     bytestream2_init(&gb, buf, buf_len);
@@ -52,11 +54,11 @@ static const uint8_t *parse_opus_ts_header(const uint8_t *start, int *payload_le
     end_trim_flag          = (flags >> 3) & 1;
     control_extension_flag = (flags >> 2) & 1;
 
-    *payload_len = 0;
+    payload_len_tmp = *payload_len = 0;
     while (bytestream2_peek_byte(&gb) == 0xff)
-        *payload_len += bytestream2_get_byte(&gb);
+        payload_len_tmp += bytestream2_get_byte(&gb);
 
-    *payload_len += bytestream2_get_byte(&gb);
+    payload_len_tmp += bytestream2_get_byte(&gb);
 
     if (start_trim_flag)
         bytestream2_skip(&gb, 2);
@@ -66,6 +68,11 @@ static const uint8_t *parse_opus_ts_header(const uint8_t *start, int *payload_le
         control_extension_length = bytestream2_get_byte(&gb);
         bytestream2_skip(&gb, control_extension_length);
     }
+
+    if (bytestream2_tell(&gb) + payload_len_tmp > buf_len)
+        return NULL;
+
+    *payload_len = payload_len_tmp;
 
     return buf + bytestream2_tell(&gb);
 }
@@ -77,7 +84,7 @@ static const uint8_t *parse_opus_ts_header(const uint8_t *start, int *payload_le
 static int opus_find_frame_end(AVCodecParserContext *ctx, AVCodecContext *avctx,
                                const uint8_t *buf, int buf_size, int *header_len)
 {
-    OpusParseContext *s = ctx->priv_data;
+    OpusParserContext *s = ctx->priv_data;
     ParseContext *pc    = &s->pc;
     int ret, start_found, i = 0, payload_len = 0;
     const uint8_t *payload;
@@ -104,6 +111,10 @@ static int opus_find_frame_end(AVCodecParserContext *ctx, AVCodecContext *avctx,
             state = (state << 8) | payload[i];
             if ((state & OPUS_TS_MASK) == OPUS_TS_HEADER) {
                 payload = parse_opus_ts_header(payload, &payload_len, buf_size - i);
+                if (!payload) {
+                    av_log(avctx, AV_LOG_ERROR, "Error parsing Ogg TS header.\n");
+                    return AVERROR_INVALIDDATA;
+                }
                 *header_len = payload - buf;
                 start_found = 1;
                 break;
@@ -156,7 +167,7 @@ static int opus_parse(AVCodecParserContext *ctx, AVCodecContext *avctx,
                        const uint8_t **poutbuf, int *poutbuf_size,
                        const uint8_t *buf, int buf_size)
 {
-    OpusParseContext *s = ctx->priv_data;
+    OpusParserContext *s = ctx->priv_data;
     ParseContext *pc    = &s->pc;
     int next, header_len;
 
@@ -180,9 +191,9 @@ static int opus_parse(AVCodecParserContext *ctx, AVCodecContext *avctx,
     return next;
 }
 
-AVCodecParser ff_opus_parser = {
+const AVCodecParser ff_opus_parser = {
     .codec_ids      = { AV_CODEC_ID_OPUS },
-    .priv_data_size = sizeof(OpusParseContext),
+    .priv_data_size = sizeof(OpusParserContext),
     .parser_parse   = opus_parse,
     .parser_close   = ff_parse_close
 };

@@ -22,7 +22,10 @@
 #ifndef AVCODEC_AACENC_H
 #define AVCODEC_AACENC_H
 
+#include "libavutil/channel_layout.h"
 #include "libavutil/float_dsp.h"
+#include "libavutil/mem_internal.h"
+
 #include "avcodec.h"
 #include "put_bits.h"
 
@@ -45,6 +48,7 @@ typedef struct AACEncOptions {
     int pns;
     int tns;
     int ltp;
+    int pce;
     int pred;
     int mid_side;
     int intensity_stereo;
@@ -78,7 +82,7 @@ typedef struct AACCoefficientsEncoder {
     void (*search_for_pred)(struct AACEncContext *s, SingleChannelElement *sce);
 } AACCoefficientsEncoder;
 
-extern AACCoefficientsEncoder ff_aac_coders[];
+extern const AACCoefficientsEncoder ff_aac_coders[];
 
 typedef struct AACQuantizeBandCostCacheEntry {
     float rd;
@@ -89,6 +93,15 @@ typedef struct AACQuantizeBandCostCacheEntry {
     uint16_t generation;
 } AACQuantizeBandCostCacheEntry;
 
+typedef struct AACPCEInfo {
+    AVChannelLayout layout;
+    int num_ele[4];                              ///< front, side, back, lfe
+    int pairing[3][8];                           ///< front, side, back
+    int index[4][8];                             ///< front, side, back, lfe
+    uint8_t config_map[16];                      ///< configs the encoder's channel specific settings
+    uint8_t reorder_map[16];                     ///< maps channels from lavc to aac order
+} AACPCEInfo;
+
 /**
  * AAC encoder context
  */
@@ -96,21 +109,26 @@ typedef struct AACEncContext {
     AVClass *av_class;
     AACEncOptions options;                       ///< encoding options
     PutBitContext pb;
-    FFTContext mdct1024;                         ///< long (1024 samples) frame transform context
-    FFTContext mdct128;                          ///< short (128 samples) frame transform context
+    AVTXContext *mdct1024;                       ///< long (1024 samples) frame transform context
+    av_tx_fn mdct1024_fn;
+    AVTXContext *mdct128;                        ///< short (128 samples) frame transform context
+    av_tx_fn mdct128_fn;
     AVFloatDSPContext *fdsp;
-    float *planar_samples[8];                    ///< saved preprocessed input
+    AACPCEInfo pce;                              ///< PCE data, if needed
+    float *planar_samples[16];                   ///< saved preprocessed input
 
     int profile;                                 ///< copied from avctx
+    int needs_pce;                               ///< flag for non-standard layout
     LPCContext lpc;                              ///< used by TNS
     int samplerate_index;                        ///< MPEG-4 samplerate index
     int channels;                                ///< channel count
+    const uint8_t *reorder_map;                  ///< lavc to aac reorder map
     const uint8_t *chan_map;                     ///< channel configuration map
 
     ChannelElement *cpe;                         ///< channel elements
     FFPsyContext psy;
     struct FFPsyPreprocessContext* psypp;
-    AACCoefficientsEncoder *coder;
+    const AACCoefficientsEncoder *coder;
     int cur_channel;                             ///< current channel for coder context
     int random_state;
     float lambda;

@@ -26,6 +26,7 @@
 
 #include "libavutil/bprint.h"
 #include "libavutil/log.h"
+#include "libavutil/mem.h"
 
 #include "config.h"
 #include "jni.h"
@@ -85,7 +86,7 @@ JNIEnv *ff_jni_get_env(void *log_ctx)
         av_log(log_ctx, AV_LOG_ERROR, "The specified JNI version is not supported\n");
         break;
     default:
-        av_log(log_ctx, AV_LOG_ERROR, "Failed to get the JNI environment attached to this thread");
+        av_log(log_ctx, AV_LOG_ERROR, "Failed to get the JNI environment attached to this thread\n");
         break;
     }
 

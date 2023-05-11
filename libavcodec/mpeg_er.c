@@ -18,6 +18,7 @@
 
 #include "error_resilience.h"
 #include "mpegvideo.h"
+#include "mpegvideodec.h"
 #include "mpeg_er.h"
 
 static void set_erpic(ERPicture *dst, Picture *src)
@@ -71,12 +72,16 @@ static void mpeg_er_decode_mb(void *opaque, int ref, int mv_dir, int mv_type,
     s->mb_skipped = mb_skipped;
     s->mb_x       = mb_x;
     s->mb_y       = mb_y;
+    s->mcsel      = 0;
     memcpy(s->mv, mv, sizeof(*mv));
 
     ff_init_block_index(s);
-    ff_update_block_index(s);
+    ff_update_block_index(s, s->avctx->bits_per_raw_sample,
+                          s->avctx->lowres, s->chroma_x_shift);
 
     s->bdsp.clear_blocks(s->block[0]);
+    if (!s->chroma_y_shift)
+        s->bdsp.clear_blocks(s->block[6]);
 
     s->dest[0] = s->current_picture.f->data[0] +
                  s->mb_y * 16 * s->linesize +
@@ -91,7 +96,7 @@ static void mpeg_er_decode_mb(void *opaque, int ref, int mv_dir, int mv_type,
     if (ref)
         av_log(s->avctx, AV_LOG_DEBUG,
                "Interlaced error concealment is not fully implemented\n");
-    ff_mpv_decode_mb(s, s->block);
+    ff_mpv_reconstruct_mb(s, s->block);
 }
 
 int ff_mpeg_er_init(MpegEncContext *s)

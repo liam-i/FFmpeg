@@ -49,6 +49,7 @@ typedef struct DeflickerContext {
 
     int size;
     int mode;
+    int bypass;
 
     int eof;
     int depth;
@@ -84,36 +85,34 @@ static const AVOption deflicker_options[] = {
         { "cm",      "cubic mean",      0, AV_OPT_TYPE_CONST, {.i64=CUBIC_MEAN},       0, 0, FLAGS, "mode" },
         { "pm",      "power mean",      0, AV_OPT_TYPE_CONST, {.i64=POWER_MEAN},       0, 0, FLAGS, "mode" },
         { "median",  "median",          0, AV_OPT_TYPE_CONST, {.i64=MEDIAN},           0, 0, FLAGS, "mode" },
+    { "bypass", "leave frames unchanged",  OFFSET(bypass), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
     { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(deflicker);
 
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pixel_fmts[] = {
-        AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY10,
-        AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY16,
-        AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
-        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
-        AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
-        AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_YUVJ444P,
-        AV_PIX_FMT_YUVJ411P,
-        AV_PIX_FMT_YUV420P9, AV_PIX_FMT_YUV422P9, AV_PIX_FMT_YUV444P9,
-        AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
-        AV_PIX_FMT_YUV440P10,
-        AV_PIX_FMT_YUV444P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV420P12,
-        AV_PIX_FMT_YUV440P12,
-        AV_PIX_FMT_YUV444P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV420P14,
-        AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
-        AV_PIX_FMT_NONE
-    };
-    AVFilterFormats *formats = ff_make_format_list(pixel_fmts);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    return ff_set_common_formats(ctx, formats);
-}
+static const enum AVPixelFormat pixel_fmts[] = {
+    AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY9, AV_PIX_FMT_GRAY10,
+    AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY14, AV_PIX_FMT_GRAY16,
+    AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
+    AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
+    AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
+    AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_YUVJ444P,
+    AV_PIX_FMT_YUVJ411P,
+    AV_PIX_FMT_YUV420P9, AV_PIX_FMT_YUV422P9, AV_PIX_FMT_YUV444P9,
+    AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
+    AV_PIX_FMT_YUV440P10,
+    AV_PIX_FMT_YUV444P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV420P12,
+    AV_PIX_FMT_YUV440P12,
+    AV_PIX_FMT_YUV444P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV420P14,
+    AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
+    AV_PIX_FMT_YUVA420P,  AV_PIX_FMT_YUVA422P,   AV_PIX_FMT_YUVA444P,
+    AV_PIX_FMT_YUVA444P9, AV_PIX_FMT_YUVA444P10, AV_PIX_FMT_YUVA444P12, AV_PIX_FMT_YUVA444P16,
+    AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA422P12, AV_PIX_FMT_YUVA422P16,
+    AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA420P16,
+    AV_PIX_FMT_NONE
+};
 
 static int deflicker8(AVFilterContext *ctx,
                       const uint8_t *src, ptrdiff_t src_linesize,
@@ -377,9 +376,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *buf)
     }
 
     s->get_factor(ctx, &f);
-    s->deflicker(ctx, in->data[0], in->linesize[0], out->data[0], out->linesize[0],
-                 outlink->w, outlink->h, f);
-    for (y = 1; y < s->nb_planes; y++) {
+    if (!s->bypass)
+        s->deflicker(ctx, in->data[0], in->linesize[0], out->data[0], out->linesize[0],
+                     outlink->w, outlink->h, f);
+    for (y = 1 - s->bypass; y < s->nb_planes; y++) {
         av_image_copy_plane(out->data[y], out->linesize[y],
                             in->data[y], in->linesize[y],
                             s->planewidth[y] * (1 + (s->depth > 8)), s->planeheight[y]);
@@ -417,7 +417,10 @@ static int request_frame(AVFilterLink *outlink)
 
     ret = ff_request_frame(ctx->inputs[0]);
     if (ret == AVERROR_EOF && s->available > 0) {
-        AVFrame *buf = av_frame_clone(ff_bufqueue_peek(&s->q, s->size - 1));
+        AVFrame *buf = ff_bufqueue_peek(&s->q, s->available - 1);
+        if (!buf)
+            return AVERROR(ENOMEM);
+        buf = av_frame_clone(buf);
         if (!buf)
             return AVERROR(ENOMEM);
 
@@ -444,7 +447,6 @@ static const AVFilterPad inputs[] = {
         .filter_frame = filter_frame,
         .config_props = config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad outputs[] = {
@@ -453,16 +455,15 @@ static const AVFilterPad outputs[] = {
         .type          = AVMEDIA_TYPE_VIDEO,
         .request_frame = request_frame,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_deflicker = {
+const AVFilter ff_vf_deflicker = {
     .name          = "deflicker",
     .description   = NULL_IF_CONFIG_SMALL("Remove temporal frame luminance variations."),
     .priv_size     = sizeof(DeflickerContext),
     .priv_class    = &deflicker_class,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = inputs,
-    .outputs       = outputs,
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_PIXFMTS_ARRAY(pixel_fmts),
 };

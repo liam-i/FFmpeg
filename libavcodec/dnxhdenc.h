@@ -28,11 +28,13 @@
 
 #include "config.h"
 
+#include "libavutil/mem_internal.h"
+
 #include "mpegvideo.h"
 #include "dnxhddata.h"
 
 typedef struct RCCMPEntry {
-    uint16_t mb;
+    uint32_t mb;
     int value;
 } RCCMPEntry;
 
@@ -74,9 +76,9 @@ typedef struct DNXHDEncContext {
     unsigned min_padding;
     int intra_quant_bias;
 
-    DECLARE_ALIGNED(16, int16_t, blocks)[12][64];
-    DECLARE_ALIGNED(16, uint8_t, edge_buf_y)[256];
-    DECLARE_ALIGNED(16, uint8_t, edge_buf_uv)[2][256];
+    DECLARE_ALIGNED(32, int16_t, blocks)[12][64];
+    DECLARE_ALIGNED(16, uint8_t, edge_buf_y)[512]; // has to hold 16x16 uint16 when depth=10
+    DECLARE_ALIGNED(16, uint8_t, edge_buf_uv)[2][512]; // has to hold 16x16 uint16_t when depth=10
 
     int      (*qmatrix_c)     [64];
     int      (*qmatrix_l)     [64];
@@ -84,8 +86,10 @@ typedef struct DNXHDEncContext {
     uint16_t (*qmatrix_c16)[2][64];
 
     unsigned frame_bits;
-    uint8_t *src[3];
+    const uint8_t *src[3];
 
+    uint32_t *orig_vlc_codes;
+    uint8_t  *orig_vlc_bits;
     uint32_t *vlc_codes;
     uint8_t  *vlc_bits;
     uint16_t *run_codes;
@@ -96,7 +100,7 @@ typedef struct DNXHDEncContext {
     unsigned qscale;
     unsigned lambda;
 
-    uint16_t *mb_bits;
+    uint32_t *mb_bits;
     uint8_t  *mb_qscale;
 
     RCCMPEntry *mb_cmp;

@@ -28,19 +28,13 @@
  * FF Video Codec 1 (a lossless codec)
  */
 
-#include "libavutil/avassert.h"
-#include "libavutil/crc.h"
-#include "libavutil/opt.h"
 #include "libavutil/imgutils.h"
-#include "libavutil/pixdesc.h"
-#include "libavutil/timer.h"
 #include "avcodec.h"
 #include "get_bits.h"
-#include "internal.h"
 #include "mathops.h"
 #include "put_bits.h"
 #include "rangecoder.h"
-#include "thread.h"
+#include "threadframe.h"
 
 #ifdef __INTEL_COMPILER
 #undef av_flatten
@@ -74,7 +68,7 @@ typedef struct PlaneContext {
     uint8_t interlace_bit_state[2];
 } PlaneContext;
 
-#define MAX_SLICES 256
+#define MAX_SLICES 1024
 
 typedef struct FFV1Context {
     AVClass *class;
@@ -91,12 +85,13 @@ typedef struct FFV1Context {
     int chroma_h_shift, chroma_v_shift;
     int transparency;
     int flags;
-    int picture_number;
+    int64_t picture_number;
     int key_frame;
     ThreadFrame picture, last_picture;
     struct FFV1Context *fsrc;
 
     AVFrame *cur;
+    const AVFrame *cur_enc_frame;
     int plane_count;
     int ac;                              ///< 1=range coder <-> 0=golomb rice
     int ac_byte_count;                   ///< number of bytes used for AC coding
@@ -141,11 +136,11 @@ typedef struct FFV1Context {
 } FFV1Context;
 
 int ff_ffv1_common_init(AVCodecContext *avctx);
-int ff_ffv1_init_slice_state(FFV1Context *f, FFV1Context *fs);
+int ff_ffv1_init_slice_state(const FFV1Context *f, FFV1Context *fs);
 int ff_ffv1_init_slices_state(FFV1Context *f);
 int ff_ffv1_init_slice_contexts(FFV1Context *f);
 int ff_ffv1_allocate_initial_states(FFV1Context *f);
-void ff_ffv1_clear_slice_state(FFV1Context *f, FFV1Context *fs);
+void ff_ffv1_clear_slice_state(const FFV1Context *f, FFV1Context *fs);
 int ff_ffv1_close(AVCodecContext *avctx);
 
 static av_always_inline int fold(int diff, int bits)
@@ -153,9 +148,7 @@ static av_always_inline int fold(int diff, int bits)
     if (bits == 8)
         diff = (int8_t)diff;
     else {
-        diff +=  1 << (bits  - 1);
-        diff  = av_mod_uintp2(diff, bits);
-        diff -=  1 << (bits  - 1);
+        diff = sign_extend(diff, bits);
     }
 
     return diff;
@@ -176,35 +169,17 @@ static inline void update_vlc_state(VlcState *const state, const int v)
     count++;
 
     if (drift <= -count) {
-        if (state->bias > -128)
-            state->bias--;
+        state->bias = FFMAX(state->bias - 1, -128);
 
-        drift += count;
-        if (drift <= -count)
-            drift = -count + 1;
+        drift = FFMAX(drift + count, -count + 1);
     } else if (drift > 0) {
-        if (state->bias < 127)
-            state->bias++;
+        state->bias = FFMIN(state->bias + 1, 127);
 
-        drift -= count;
-        if (drift > 0)
-            drift = 0;
+        drift = FFMIN(drift - count, 0);
     }
 
     state->drift = drift;
     state->count = count;
 }
-
-#define TYPE int16_t
-#define RENAME(name) name
-#include "ffv1_template.c"
-#undef TYPE
-#undef RENAME
-
-#define TYPE int32_t
-#define RENAME(name) name ## 32
-#include "ffv1_template.c"
-#undef TYPE
-#undef RENAME
 
 #endif /* AVCODEC_FFV1_H */

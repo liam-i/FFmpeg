@@ -18,10 +18,6 @@
 
 #include <windows.h>
 
-#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600
-#undef _WIN32_WINNT
-#define _WIN32_WINNT 0x0600
-#endif
 #define DXVA2API_USE_BITFIELDS
 #define COBJMACROS
 
@@ -86,7 +82,15 @@ static const struct {
 } supported_formats[] = {
     { MKTAG('N', 'V', '1', '2'), AV_PIX_FMT_NV12 },
     { MKTAG('P', '0', '1', '0'), AV_PIX_FMT_P010 },
+    { MKTAG('A', 'Y', 'U', 'V'), AV_PIX_FMT_VUYX },
+    { MKTAG('Y', 'U', 'Y', '2'), AV_PIX_FMT_YUYV422 },
+    { MKTAG('Y', '2', '1', '0'), AV_PIX_FMT_Y210 },
+    { MKTAG('Y', '4', '1', '0'), AV_PIX_FMT_XV30 },
+    { MKTAG('P', '0', '1', '6'), AV_PIX_FMT_P012 },
+    { MKTAG('Y', '2', '1', '6'), AV_PIX_FMT_Y212 },
+    { MKTAG('Y', '4', '1', '6'), AV_PIX_FMT_XV36 },
     { D3DFMT_P8,                 AV_PIX_FMT_PAL8 },
+    { D3DFMT_A8R8G8B8,           AV_PIX_FMT_BGRA },
 };
 
 DEFINE_GUID(video_decoder_service,   0xfc51a551, 0xd5e7, 0x11d9, 0xaf, 0x55, 0x00, 0x05, 0x4e, 0x43, 0xff, 0x02);
@@ -121,7 +125,14 @@ static void dxva2_frames_uninit(AVHWFramesContext *ctx)
     }
 }
 
-static AVBufferRef *dxva2_pool_alloc(void *opaque, int size)
+static void dxva2_pool_release_dummy(void *opaque, uint8_t *data)
+{
+    // important not to free anything here--data is a surface object
+    // associated with the call to CreateSurface(), and these surfaces are
+    // released in dxva2_frames_uninit()
+}
+
+static AVBufferRef *dxva2_pool_alloc(void *opaque, size_t size)
 {
     AVHWFramesContext      *ctx = (AVHWFramesContext*)opaque;
     DXVA2FramesContext       *s = ctx->internal->priv;
@@ -130,7 +141,7 @@ static AVBufferRef *dxva2_pool_alloc(void *opaque, int size)
     if (s->nb_surfaces_used < hwctx->nb_surfaces) {
         s->nb_surfaces_used++;
         return av_buffer_create((uint8_t*)s->surfaces_internal[s->nb_surfaces_used - 1],
-                                sizeof(*hwctx->surfaces), NULL, 0, 0);
+                                sizeof(*hwctx->surfaces), dxva2_pool_release_dummy, 0, 0);
     }
 
     return NULL;
@@ -176,8 +187,8 @@ static int dxva2_init_pool(AVHWFramesContext *ctx)
         return AVERROR(EINVAL);
     }
 
-    s->surfaces_internal = av_mallocz_array(ctx->initial_pool_size,
-                                            sizeof(*s->surfaces_internal));
+    s->surfaces_internal = av_calloc(ctx->initial_pool_size,
+                                     sizeof(*s->surfaces_internal));
     if (!s->surfaces_internal)
         return AVERROR(ENOMEM);
 
@@ -300,8 +311,10 @@ static int dxva2_map_frame(AVHWFramesContext *ctx, AVFrame *dst, const AVFrame *
     }
 
     map = av_mallocz(sizeof(*map));
-    if (!map)
+    if (!map) {
+        err = AVERROR(ENOMEM);
         goto fail;
+    }
 
     err = ff_hwframe_map_create(src->hw_frames_ctx, dst, src,
                                 dxva2_unmap_frame, map);
@@ -343,7 +356,7 @@ static int dxva2_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
     if (ret < 0)
         goto fail;
 
-    av_image_copy(map->data, map->linesize, src->data, src->linesize,
+    av_image_copy(map->data, map->linesize, (const uint8_t **)src->data, src->linesize,
                   ctx->sw_format, src->width, src->height);
 
 fail:
@@ -374,7 +387,7 @@ static int dxva2_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
         dst_linesize[i] = dst->linesize[i];
         src_linesize[i] = map->linesize[i];
     }
-    av_image_copy_uc_from(dst->data, dst_linesize, map->data, src_linesize,
+    av_image_copy_uc_from(dst->data, dst_linesize, (const uint8_t **)map->data, src_linesize,
                           ctx->sw_format, src->width, src->height);
 fail:
     av_frame_free(&map);
@@ -476,7 +489,12 @@ static int dxva2_device_create9ex(AVHWDeviceContext *ctx, UINT adapter)
     if (FAILED(hr))
         return AVERROR_UNKNOWN;
 
-    IDirect3D9Ex_GetAdapterDisplayModeEx(d3d9ex, adapter, &modeex, NULL);
+    modeex.Size = sizeof(D3DDISPLAYMODEEX);
+    hr = IDirect3D9Ex_GetAdapterDisplayModeEx(d3d9ex, adapter, &modeex, NULL);
+    if (FAILED(hr)) {
+        IDirect3D9Ex_Release(d3d9ex);
+        return AVERROR_UNKNOWN;
+    }
 
     d3dpp.BackBufferFormat = modeex.Format;
 

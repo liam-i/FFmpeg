@@ -20,6 +20,7 @@
  */
 #include "avformat.h"
 #include "avio_internal.h"
+#include "mux.h"
 #include "rm.h"
 #include "libavutil/dict.h"
 
@@ -72,13 +73,11 @@ static int rv10_write_header(AVFormatContext *ctx,
     RMMuxContext *rm = ctx->priv_data;
     AVIOContext *s = ctx->pb;
     StreamInfo *stream;
-    unsigned char *data_offset_ptr, *start_ptr;
     const char *desc, *mimetype;
     int nb_packets, packet_total_size, packet_max_size, size, packet_avg_size, i;
-    int bit_rate, v, duration, flags, data_pos;
+    int bit_rate, v, duration, flags;
+    int data_offset;
     AVDictionaryEntry *tag;
-
-    start_ptr = s->buf_ptr;
 
     ffio_wfourcc(s, ".RMF");
     avio_wb32(s,18); /* header size */
@@ -119,7 +118,7 @@ static int rv10_write_header(AVFormatContext *ctx,
     avio_wb32(s, BUFFER_DURATION);           /* preroll */
     avio_wb32(s, index_pos);           /* index offset */
     /* computation of data the data offset */
-    data_offset_ptr = s->buf_ptr;
+    data_offset = avio_tell(s);
     avio_wb32(s, 0);           /* data offset : will be patched after */
     avio_wb16(s, ctx->nb_streams);    /* num streams */
     flags = 1 | 2; /* save allowed & perfect play */
@@ -230,7 +229,7 @@ static int rv10_write_header(AVFormatContext *ctx,
             avio_wb32(s, 0); /* unknown */
             avio_wb16(s, stream->par->sample_rate); /* sample rate */
             avio_wb32(s, 0x10); /* unknown */
-            avio_wb16(s, stream->par->channels);
+            avio_wb16(s, stream->par->ch_layout.nb_channels);
             put_str8(s, "Int0"); /* codec name */
             if (stream->par->codec_tag) {
                 avio_w8(s, 4); /* tag length */
@@ -276,12 +275,11 @@ static int rv10_write_header(AVFormatContext *ctx,
     }
 
     /* patch data offset field */
-    data_pos = s->buf_ptr - start_ptr;
-    rm->data_pos = data_pos;
-    data_offset_ptr[0] = data_pos >> 24;
-    data_offset_ptr[1] = data_pos >> 16;
-    data_offset_ptr[2] = data_pos >> 8;
-    data_offset_ptr[3] = data_pos;
+    rm->data_pos = avio_tell(s);
+    if (avio_seek(s, data_offset, SEEK_SET) >= 0) {
+        avio_wb32(s, rm->data_pos);
+        avio_seek(s, rm->data_pos, SEEK_SET);
+    }
 
     /* data stream */
     ffio_wfourcc(s, "DATA");
@@ -363,7 +361,6 @@ static int rm_write_header(AVFormatContext *s)
 
     if (rv10_write_header(s, 0, 0))
         return AVERROR_INVALIDDATA;
-    avio_flush(s->pb);
     return 0;
 }
 
@@ -469,16 +466,16 @@ static int rm_write_trailer(AVFormatContext *s)
 }
 
 
-AVOutputFormat ff_rm_muxer = {
-    .name              = "rm",
-    .long_name         = NULL_IF_CONFIG_SMALL("RealMedia"),
-    .mime_type         = "application/vnd.rn-realmedia",
-    .extensions        = "rm,ra",
+const FFOutputFormat ff_rm_muxer = {
+    .p.name            = "rm",
+    .p.long_name       = NULL_IF_CONFIG_SMALL("RealMedia"),
+    .p.mime_type       = "application/vnd.rn-realmedia",
+    .p.extensions      = "rm,ra",
     .priv_data_size    = sizeof(RMMuxContext),
-    .audio_codec       = AV_CODEC_ID_AC3,
-    .video_codec       = AV_CODEC_ID_RV10,
+    .p.audio_codec     = AV_CODEC_ID_AC3,
+    .p.video_codec     = AV_CODEC_ID_RV10,
     .write_header      = rm_write_header,
     .write_packet      = rm_write_packet,
     .write_trailer     = rm_write_trailer,
-    .codec_tag         = (const AVCodecTag* const []){ ff_rm_codec_tags, 0 },
+    .p.codec_tag       = (const AVCodecTag* const []){ ff_rm_codec_tags, 0 },
 };

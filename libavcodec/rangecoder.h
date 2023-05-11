@@ -29,8 +29,8 @@
 
 #include <stdint.h>
 
-#include "libavutil/common.h"
 #include "libavutil/avassert.h"
+#include "libavutil/intmath.h"
 
 typedef struct RangeCoder {
     int low;
@@ -42,11 +42,21 @@ typedef struct RangeCoder {
     uint8_t *bytestream_start;
     uint8_t *bytestream;
     uint8_t *bytestream_end;
+    int overread;
+#define MAX_OVERREAD 2
 } RangeCoder;
 
 void ff_init_range_encoder(RangeCoder *c, uint8_t *buf, int buf_size);
 void ff_init_range_decoder(RangeCoder *c, const uint8_t *buf, int buf_size);
-int ff_rac_terminate(RangeCoder *c);
+
+/**
+ * Terminates the range coder
+ * @param version version 0 requires the decoder to know the data size in bytes
+ *                version 1 needs about 1 bit more space but does not need to
+ *                          carry the size from encoder to decoder
+ */
+int ff_rac_terminate(RangeCoder *c, int version);
+
 void ff_build_rac_states(RangeCoder *c, int factor, int max_p);
 
 static inline void renorm_encoder(RangeCoder *c)
@@ -106,9 +116,11 @@ static inline void refill(RangeCoder *c)
     if (c->range < 0x100) {
         c->range <<= 8;
         c->low   <<= 8;
-        if (c->bytestream < c->bytestream_end)
+        if (c->bytestream < c->bytestream_end) {
             c->low += c->bytestream[0];
-        c->bytestream++;
+            c->bytestream++;
+        } else
+            c->overread ++;
     }
 }
 
