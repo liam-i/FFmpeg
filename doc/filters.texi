@@ -9083,6 +9083,16 @@ Only deinterlace frames marked as interlaced.
 The default value is @code{all}.
 @end table
 
+@section ccrepack
+
+Repack CEA-708 closed captioning side data
+
+This filter fixes various issues seen with commerical encoders
+related to upstream malformed CEA-708 payloads, specifically
+incorrect number of tuples (wrong cc_count for the target FPS),
+and incorrect ordering of tuples (i.e. the CEA-608 tuples are not at
+the first entries in the payload).
+
 @section cas
 
 Apply Contrast Adaptive Sharpen filter to video stream.
@@ -10697,7 +10707,7 @@ crop=in_w/2:in_h/2:(in_w-out_w)/2+((in_w-out_w)/2)*sin(n/10):(in_h-out_h)/2 +((i
 @item
 Apply erratic camera effect depending on timestamp:
 @example
-crop=in_w/2:in_h/2:(in_w-out_w)/2+((in_w-out_w)/2)*sin(t*10):(in_h-out_h)/2 +((in_h-out_h)/2)*sin(t*13)"
+crop=in_w/2:in_h/2:(in_w-out_w)/2+((in_w-out_w)/2)*sin(t*10):(in_h-out_h)/2 +((in_h-out_h)/2)*sin(t*13)
 @end example
 
 @item
